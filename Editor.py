@@ -9,7 +9,7 @@ def add_white_circle(img: Image, size: int):
     new_img = Image.new("RGBA", (size, size), (255, 255, 255, 255))
     
     # Ajusta o tamanho da imagem
-    img = img.resize((size, size))  # Ajusta o tamanho da imagem
+    img = img.resize((size, size), Image.Resampling.LANCZOS)  # Usando o filtro LANCZOS para preservar qualidade ao redimensionar
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
     draw.ellipse((0, 0, size, size), fill=255)
@@ -62,6 +62,6 @@ if uploaded_files:
             st.download_button(f"Baixar {uploaded_file.name} como PNG", buf, f"{uploaded_file.name}_final.png", "image/png")
         elif export_format in ["JPG", "JPEG"]:
             final_image = final_image.convert("RGB")  # Converte para RGB para exportação em JPG
-            final_image.save(buf, format="JPEG")
+            final_image.save(buf, format="JPEG", quality=95)  # Ajuste a qualidade para evitar compressão excessiva
             buf.seek(0)
             st.download_button(f"Baixar {uploaded_file.name} como JPG", buf, f"{uploaded_file.name}_final.jpg", "image/jpeg")
