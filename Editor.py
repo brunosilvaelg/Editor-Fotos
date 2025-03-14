@@ -22,37 +22,46 @@ def add_white_circle(img: Image, size: int):
 # Título da aplicação
 st.title("Remover Fundo e Colocar em Círculo Branco")
 
-# Carregar imagem
-uploaded_file = st.file_uploader("Escolha uma imagem", type=["png", "jpg", "jpeg"])
+# Carregar múltiplas imagens
+uploaded_files = st.file_uploader("Escolha as imagens", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    # Exibir a imagem carregada
-    st.image(uploaded_file, caption="Imagem Original", use_column_width=True)
-    
-    # Lendo os dados da imagem carregada.
-    input_image = uploaded_file.read()  # Lê os bytes da imagem carregada
-    
-    # Remover o fundo da imagem com rembg (comando binário).
-    output_image_bytes = remove(input_image)  # O retorno é um objeto bytes
-    
-    # Converter os bytes em uma imagem usando io.BytesIO
-    output_image = Image.open(io.BytesIO(output_image_bytes))
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+        # Exibir a imagem carregada
+        st.image(uploaded_file, caption=f"Imagem Original: {uploaded_file.name}", use_column_width=True)
+        
+        # Lendo os dados da imagem carregada
+        input_image = uploaded_file.read()  # Lê os bytes da imagem carregada
+        
+        # Remover o fundo da imagem com rembg
+        output_image_bytes = remove(input_image)  # O retorno é um objeto bytes
+        
+        # Converter os bytes em uma imagem usando io.BytesIO
+        output_image = Image.open(io.BytesIO(output_image_bytes))
 
-    # Exibir imagem sem fundo
-    st.image(output_image, caption="Imagem sem Fundo", use_column_width=True)
+        # Exibir imagem sem fundo
+        st.image(output_image, caption="Imagem sem Fundo", use_column_width=True)
 
-    # Ajustar tamanho da imagem
-    size = st.slider("Redimensionar imagem", min_value=100, max_value=1000, value=500)
+        # Ajustar tamanho da imagem manualmente (largura e altura)
+        width = st.number_input("Largura da imagem", min_value=100, max_value=1000, value=500)
+        height = st.number_input("Altura da imagem", min_value=100, max_value=1000, value=500)
 
-    # Adicionar círculo branco
-    final_image = add_white_circle(output_image, size)
-    
-    # Exibir a imagem final
-    st.image(final_image, caption="Imagem Final com Círculo Branco", use_column_width=True)
+        # Adicionar círculo branco
+        final_image = add_white_circle(output_image, max(width, height))  # Usando a maior dimensão para o círculo
+        
+        # Exibir a imagem final
+        st.image(final_image, caption=f"Imagem Final com Círculo Branco: {uploaded_file.name}", use_column_width=True)
 
-    # Salvar a imagem final
-    buf = io.BytesIO()
-    final_image.save(buf, format="PNG")
-    buf.seek(0)
-    
-    st.download_button("Baixar Imagem Final", buf, "imagem_final.png", "image/png")
+        # Opção de salvar a imagem final em diferentes formatos
+        export_format = st.selectbox("Escolha o formato de exportação", ["PNG", "JPG", "JPEG"])
+
+        buf = io.BytesIO()
+        if export_format == "PNG":
+            final_image.save(buf, format="PNG")
+            buf.seek(0)
+            st.download_button(f"Baixar {uploaded_file.name} como PNG", buf, f"{uploaded_file.name}_final.png", "image/png")
+        elif export_format in ["JPG", "JPEG"]:
+            final_image = final_image.convert("RGB")  # Converte para RGB para exportação em JPG
+            final_image.save(buf, format="JPEG")
+            buf.seek(0)
+            st.download_button(f"Baixar {uploaded_file.name} como JPG", buf, f"{uploaded_file.name}_final.jpg", "image/jpeg")
