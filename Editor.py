@@ -1,67 +1,125 @@
-import streamlit as st
-from rembg import remove
-from PIL import Image, ImageDraw
+import os
 import io
+import threading
+from tkinter import filedialog, messagebox
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from PIL import Image, ImageDraw, ImageOps
+from rembg import remove
 
-# Função para adicionar o fundo branco e fazer o recorte circular
-def add_white_circle(img: Image, size: int):
-    # Cria uma nova imagem com fundo branco
-    new_img = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+def create_circular_image(input_image: Image, size: int):
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    img_fitted = ImageOps.contain(input_image, (size, size), method=Image.Resampling.LANCZOS)
     
-    # Ajusta o tamanho da imagem
-    img = img.resize((size, size), Image.Resampling.LANCZOS)  # Usando o filtro LANCZOS para preservar qualidade ao redimensionar
+    img_w, img_h = img_fitted.size
+    offset_x = (size - img_w) // 2
+    offset_y = (size - img_h) // 2
+    canvas.paste(img_fitted, (offset_x, offset_y), mask=img_fitted if img_fitted.mode == 'RGBA' else None)
+
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
     draw.ellipse((0, 0, size, size), fill=255)
-    
-    # Aplica a máscara circular
-    new_img.paste(img, (0, 0), mask=mask)
-    
-    return new_img
 
-# Título da aplicação
-st.title("Remover Fundo e Colocar em Círculo Branco")
+    final_white_bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+    final_white_bg.paste(canvas, (0, 0), mask=mask)
 
-# Carregar múltiplas imagens
-uploaded_files = st.file_uploader("Escolha as imagens", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    return final_white_bg
 
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        # Exibir a imagem carregada
-        st.image(uploaded_file, caption=f"Imagem Original: {uploaded_file.name}", use_column_width=True)
+class EditorApp(ttk.Window):
+    def __init__(self):
+        super().__init__(themename="flatly")
+        self.title("Editor de Fotos Circular")
+        self.geometry("450x450")
+        self.resizable(False, False)
+
+        self.size_var = ttk.IntVar(value=400)
+        self.format_var = ttk.StringVar(value="PNG")
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        title_label = ttk.Label(self, text="Remover Fundo e Criar Círculo", font=("Helvetica", 16, "bold"))
+        title_label.pack(pady=20)
+
+        size_frame = ttk.LabelFrame(self, text="Tamanho da Imagem")
+        size_frame.pack(fill=X, padx=20, pady=10)
+        ttk.Radiobutton(size_frame, text="100x100 pixels", variable=self.size_var, value=100).pack(side=LEFT, padx=10, pady=10)
+        ttk.Radiobutton(size_frame, text="400x400 pixels", variable=self.size_var, value=400).pack(side=LEFT, padx=10, pady=10)
+
+        format_frame = ttk.LabelFrame(self, text="Formato de Exportação")
+        format_frame.pack(fill=X, padx=20, pady=10)
+        ttk.Radiobutton(format_frame, text="PNG (Qualidade Máxima)", variable=self.format_var, value="PNG").pack(side=LEFT, padx=10, pady=10)
+        ttk.Radiobutton(format_frame, text="JPG (Arquivo Menor)", variable=self.format_var, value="JPG").pack(side=LEFT, padx=10, pady=10)
+
+        self.process_btn = ttk.Button(self, text="Selecionar Imagens e Processar", bootstyle=SUCCESS, command=self.start_processing_thread)
+        self.process_btn.pack(pady=20, fill=X, padx=20)
+
+        self.progress = ttk.Progressbar(self, bootstyle=INFO, mode='determinate')
+        self.progress.pack(fill=X, padx=20, pady=5)
+
+        self.status_label = ttk.Label(self, text="Aguardando arquivos...", font=("Helvetica", 10))
+        self.status_label.pack(pady=5)
+
+    def start_processing_thread(self):
+        file_paths = filedialog.askopenfilenames(
+            title="Escolha as imagens",
+            filetypes=[("Imagens", "*.png *.jpg *.jpeg")]
+        )
         
-        # Lendo os dados da imagem carregada
-        input_image = uploaded_file.read()  # Lê os bytes da imagem carregada
+        if not file_paths:
+            return
+
+        save_dir = filedialog.askdirectory(title="Escolha a pasta para salvar os resultados")
         
-        # Remover o fundo da imagem com rembg
-        output_image_bytes = remove(input_image)  # O retorno é um objeto bytes
-        
-        # Converter os bytes em uma imagem usando io.BytesIO
-        output_image = Image.open(io.BytesIO(output_image_bytes))
+        if not save_dir:
+            return
 
-        # Exibir imagem sem fundo
-        st.image(output_image, caption="Imagem sem Fundo", use_column_width=True)
+        self.process_btn.config(state=DISABLED)
+        self.progress['maximum'] = len(file_paths)
+        self.progress['value'] = 0
 
-        # Ajustar tamanho da imagem manualmente (largura e altura)
-        width = st.number_input("Largura da imagem", min_value=100, max_value=1000, value=500)
-        height = st.number_input("Altura da imagem", min_value=100, max_value=1000, value=500)
+        thread = threading.Thread(target=self.process_images, args=(file_paths, save_dir))
+        thread.daemon = True
+        thread.start()
 
-        # Adicionar círculo branco
-        final_image = add_white_circle(output_image, max(width, height))  # Usando a maior dimensão para o círculo
-        
-        # Exibir a imagem final
-        st.image(final_image, caption=f"Imagem Final com Círculo Branco: {uploaded_file.name}", use_column_width=True)
+    def process_images(self, file_paths, save_dir):
+        target_size = self.size_var.get()
+        export_format = self.format_var.get()
 
-        # Opção de salvar a imagem final em diferentes formatos
-        export_format = st.selectbox("Escolha o formato de exportação", ["PNG", "JPG", "JPEG"])
+        for i, file_path in enumerate(file_paths):
+            filename = os.path.basename(file_path)
+            self.status_label.config(text=f"Processando: {filename}")
+            
+            try:
+                with open(file_path, 'rb') as f:
+                    input_image_bytes = f.read()
 
-        buf = io.BytesIO()
-        if export_format == "PNG":
-            final_image.save(buf, format="PNG")
-            buf.seek(0)
-            st.download_button(f"Baixar {uploaded_file.name} como PNG", buf, f"{uploaded_file.name}_final.png", "image/png")
-        elif export_format in ["JPG", "JPEG"]:
-            final_image = final_image.convert("RGB")  # Converte para RGB para exportação em JPG
-            final_image.save(buf, format="JPEG", quality=95)  # Ajuste a qualidade para evitar compressão excessiva
-            buf.seek(0)
-            st.download_button(f"Baixar {uploaded_file.name} como JPG", buf, f"{uploaded_file.name}_final.jpg", "image/jpeg")
+                input_image = Image.open(io.BytesIO(input_image_bytes)).convert("RGBA")
+                output_nobg_bytes = remove(input_image_bytes)
+                output_nobg = Image.open(io.BytesIO(output_nobg_bytes))
+
+                final_image = create_circular_image(output_nobg, target_size)
+
+                base_name = os.path.splitext(filename)[0]
+                
+                if export_format == "PNG":
+                    save_path = os.path.join(save_dir, f"{base_name}_circulo_{target_size}.png")
+                    final_image.save(save_path, format="PNG")
+                else:
+                    save_path = os.path.join(save_dir, f"{base_name}_circulo_{target_size}.jpg")
+                    final_rgb = final_image.convert("RGB")
+                    final_rgb.save(save_path, format="JPEG", quality=95)
+
+            except Exception as e:
+                print(f"Erro ao processar {filename}: {e}")
+
+            self.progress['value'] = i + 1
+            self.update_idletasks()
+
+        self.status_label.config(text="Processamento concluído com sucesso!")
+        self.process_btn.config(state=NORMAL)
+        messagebox.showinfo("Concluído", "Todas as imagens foram processadas e salvas na pasta escolhida.")
+
+if __name__ == "__main__":
+    app = EditorApp()
+    app.mainloop()
